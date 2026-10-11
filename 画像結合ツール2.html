@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <title>画像グリッド結合</title>
+
+  <style>
+    body {
+      font-family: sans-serif;
+      padding: 20px;
+    }
+
+    #dropArea {
+      width: 400px;
+      height: 120px;
+      border: 2px dashed #999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 20px;
+      margin-bottom: 20px;
+    }
+
+    #dropArea.dragover {
+      background: #eef;
+      border-color: #00f;
+    }
+
+    #preview {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    #preview figure {
+      margin: 0;
+      width: 120px;
+      text-align: center;
+      font-size: 12px;
+      cursor: grab;
+    }
+
+    #preview figure.dragging {
+      opacity: 0.4;
+    }
+
+    #preview figure.dropTarget img {
+      border-color: #00f;
+      outline: 2px solid #00f;
+    }
+
+    #preview img {
+      width: 120px;
+      height: 120px;
+      object-fit: contain;
+      background: #f4f4f4;
+      border: 1px solid #ccc;
+      pointer-events: none;
+    }
+
+    #preview figcaption {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #previewHint {
+      font-size: 12px;
+      color: #666;
+      margin: 0 0 8px;
+    }
+
+    canvas {
+      margin-top: 20px;
+      border: 1px solid #ccc;
+      max-width: 100%;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>画像グリッド結合</h1>
+
+  <input type="file" id="files" multiple accept="image/png,image/jpeg,image/webp">
+
+  <label>
+    列数:
+    <input type="number" id="cols" value="2" min="1">
+  </label>
+
+  <label>
+    サイズ違いの画像:
+    <select id="fitMode">
+      <option value="contain">比率を保って収める（余白あり）</option>
+      <option value="cover">比率を保って切り抜く</option>
+      <option value="stretch">引き伸ばす（比率が変わる）</option>
+    </select>
+  </label>
+
+  <button id="merge">結合</button>
+  <button id="save">保存</button>
+
+  <div id="dropArea">
+    ここに画像をドラッグ＆ドロップ
+  </div>
+
+  <p id="previewHint" hidden>サムネイルをドラッグすると結合順を並び替えられます</p>
+  <div id="preview"></div>
+
+  <canvas id="canvas"></canvas>
+
+  <script>
+    const fileInput = document.getElementById('files');
+    const mergeBtn = document.getElementById('merge');
+    const saveBtn = document.getElementById('save');
+    const dropArea = document.getElementById('dropArea');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+
+    const preview = document.getElementById('preview');
+    const previewHint = document.getElementById('previewHint');
+
+    // 結合順に並んだ { file, url } の配列
+    let items = [];
+    let dragIndex = null;
+
+    // 選択画像をセット
+    function setFiles(files) {
+      items.forEach(item => URL.revokeObjectURL(item.url));
+
+      items = files
+        .filter(file => file.type.startsWith('image/'))
+        .map(file => ({ file, url: URL.createObjectURL(file) }));
+
+      renderPreview();
+    }
+
+    // プレビュー表示（結合される順に番号付き）
+    function renderPreview() {
+      preview.innerHTML = '';
+      previewHint.hidden = items.length < 2;
+
+      items.forEach((item, index) => {
+        const figure = document.createElement('figure');
+        const img = document.createElement('img');
+        const caption = document.createElement('figcaption');
+
+        img.src = item.url;
+        caption.textContent = `${index + 1}. ${item.file.name}`;
+        caption.title = item.file.name;
+
+        figure.draggable = true;
+        figure.dataset.index = index;
+        figure.append(img, caption);
+        preview.append(figure);
+      });
+    }
+
+    // 並び替え（プレビュー内ドラッグ）
+    preview.addEventListener('dragstart', (e) => {
+      const figure = e.target.closest('figure');
+      if (!figure) return;
+
+      dragIndex = Number(figure.dataset.index);
+      figure.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+
+    preview.addEventListener('dragover', (e) => {
+      if (dragIndex === null) return;
+      e.preventDefault();
+
+      const figure = e.target.closest('figure');
+      preview.querySelectorAll('.dropTarget').forEach(el => el.classList.remove('dropTarget'));
+      if (figure) figure.classList.add('dropTarget');
+    });
+
+    preview.addEventListener('drop', (e) => {
+      if (dragIndex === null) return;
+      e.preventDefault();
+
+      const figure = e.target.closest('figure');
+      if (figure) {
+        const toIndex = Number(figure.dataset.index);
+        const [moved] = items.splice(dragIndex, 1);
+        items.splice(toIndex, 0, moved);
+      }
+
+      dragIndex = null;
+      renderPreview();
+    });
+
+    preview.addEventListener('dragend', () => {
+      dragIndex = null;
+      preview.querySelectorAll('.dragging, .dropTarget').forEach(el => {
+        el.classList.remove('dragging', 'dropTarget');
+      });
+    });
+
+    // ファイル選択
+    fileInput.addEventListener('change', (e) => {
+      setFiles([...e.target.files]);
+    });
+
+    // ドラッグ中
+    dropArea.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropArea.classList.add('dragover');
+    });
+
+    // ドラッグ離脱
+    dropArea.addEventListener('dragleave', () => {
+      dropArea.classList.remove('dragover');
+    });
+
+    // ドロップ
+    dropArea.addEventListener('drop', (e) => {
+      e.preventDefault();
+
+      dropArea.classList.remove('dragover');
+
+      // プレビューのサムネイルを誤ってドロップした場合などは無視
+      if (e.dataTransfer.files.length === 0) return;
+
+      setFiles([...e.dataTransfer.files]);
+    });
+
+    // セル内に画像を描画
+    function drawInCell(img, x, y, cellWidth, cellHeight, fitMode) {
+
+      if (fitMode === 'stretch') {
+        ctx.drawImage(img, x, y, cellWidth, cellHeight);
+        return;
+      }
+
+      const scale = fitMode === 'cover'
+        ? Math.max(cellWidth / img.width, cellHeight / img.height)
+        : Math.min(cellWidth / img.width, cellHeight / img.height);
+
+      const w = img.width * scale;
+      const h = img.height * scale;
+
+      // セル中央に配置し、はみ出した部分はセル境界で切り取る
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x, y, cellWidth, cellHeight);
+      ctx.clip();
+      ctx.drawImage(img, x + (cellWidth - w) / 2, y + (cellHeight - h) / 2, w, h);
+      ctx.restore();
+    }
+
+    // 結合
+    mergeBtn.addEventListener('click', async () => {
+
+      if (items.length === 0) {
+        alert('画像を選択してください');
+        return;
+      }
+
+      const cols = parseInt(document.getElementById('cols').value);
+      const fitMode = document.getElementById('fitMode').value;
+
+      // 画像読み込み
+      const images = await Promise.all(
+        items.map(item => {
+          return new Promise(resolve => {
+            const img = new Image();
+
+            img.onload = () => resolve(img);
+
+            img.src = item.url;
+          });
+        })
+      );
+
+      // 1枚目サイズ基準
+      const cellWidth = images[0].width;
+      const cellHeight = images[0].height;
+
+      const rows = Math.ceil(images.length / cols);
+
+      canvas.width = cellWidth * cols;
+      canvas.height = cellHeight * rows;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      images.forEach((img, index) => {
+
+        const x = (index % cols) * cellWidth;
+        const y = Math.floor(index / cols) * cellHeight;
+
+        drawInCell(img, x, y, cellWidth, cellHeight, fitMode);
+      });
+    });
+
+    // 保存
+    saveBtn.addEventListener('click', () => {
+
+      const a = document.createElement('a');
+
+      a.href = canvas.toDataURL('image/png');
+
+      a.download = 'merged.png';
+
+      a.click();
+    });
+
+  </script>
+
+</body>
+</html>
